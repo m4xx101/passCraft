@@ -5,6 +5,7 @@ import itertools
 import sys
 import time
 import threading
+from password_strength import PasswordPolicy
 
 # Define common leet replacements
 leet_dict = {
@@ -25,19 +26,16 @@ digits = list('0123456789')
 common_passwords = [
     "123456", "password", "123456789", "12345678", "12345", "1234567", "qwerty",
     "111111", "123123", "abc123", "password1", "letmein", "welcome", "monkey",
-    "654321", "superman", "1qaz2wsx", "qazwsx", "qwe123", "football", "dragon",
-    "master", "hello", "whatever", "trustno1", "baseball", "sunshine", "starwars",
-    "princess", "azerty", "555555", "michael", "jordan", "hunter", "qaz123",
-    "zaq12wsx", "123qwe", "passw0rd", "batman", "thomas", "hockey", "121212",
-    "charlie", "liverpool", "letmein123", "a1b2c3", "secret", "freedom", "mustang",
-    "shadow", "whatever1", "monkey123", "987654", "password123", "zxcvbnm", "qazxsw",
-    "123654", "jessica", "awesome", "7777777", "1q2w3e", "william", "123abc",
-    "mickey", "pokemon", "charles", "michael1", "princess123", "987654321", "1111",
-    "888888", "sunshine1", "ashley", "bailey", "654321987", "football1", "666666",
-    "jennifer", "amanda", "james", "tigger", "happy", "iloveyou1", "michael123",
-    "summer", "admin123", "1212", "george", "trustnoone", "superman123", "hello123",
-    "qwerty123"
+    "654321", "superman", "1qaz2wsx", "qazwsx", "qwe123", "football", "dragon"
 ]
+
+policy = PasswordPolicy.from_names(
+    length=8,  # min length: 8
+    uppercase=1,  # need min. 1 uppercase letters
+    numbers=1,  # need min. 1 digits
+    special=1,  # need min. 1 special characters
+    nonletters=1  # need min. 1 non-letter characters (digits, specials, anything)
+)
 
 def leet_transform(word):
     leet_words = {word}
@@ -48,51 +46,78 @@ def leet_transform(word):
             )
     return list(leet_words)
 
-def generate_combinations(words, birthdate, contact_numbers, leet, leaked_passwords, num_passwords):
+def apply_patterns(words, birthdate, contact_numbers, leet):
     combinations = set()
-    
-    combinations.update(common_passwords)
-    combinations.update(leaked_passwords)
-    
     if birthdate:
         dd = birthdate[:2]
         mm = birthdate[2:4]
         yy = birthdate[4:8]
 
+    if leet:
+        leet_words = set()
+        for word in words:
+            leet_words.update(leet_transform(word))
+        words = list(leet_words)
+    
     if contact_numbers:
         contact_combinations = [num[:4] + num[-4:] for num in contact_numbers]
 
     for word in words:
-        if leet:
-            leet_words = leet_transform(word)
-        else:
-            leet_words = [word]
-        
-        for lw in leet_words:
-            combinations.update([lw + sc for sc in special_characters])
-            if birthdate:
-                combinations.update([lw + dd, lw + mm, lw + yy, lw + dd + mm + yy, lw + yy + mm + dd])
-            if contact_numbers:
-                combinations.update([lw + cc for cc in contact_combinations])
-            combinations.update([lw, lw + yy, lw + mm, lw + dd, lw + dd + yy, lw + dd + mm + yy, lw + yy + mm + dd])
-            for sc in special_characters:
-                combinations.update([lw + sc, lw + sc + dd, lw + sc + mm, lw + sc + yy, lw + dd + sc, lw + mm + sc, lw + yy + sc])
-            for cc in contact_combinations:
-                combinations.update([lw + cc, cc + lw])
-            combinations.update([lw + sc + yy + mm + dd for sc in special_characters])
-            combinations.update([lw + yy + mm + dd + sc for sc in special_characters])
+        for sc in special_characters:
+            combinations.add(f"{word}{sc}")
+            combinations.add(f"{sc}{word}")
+        if birthdate:
+            combinations.add(f"{word}{dd}{mm}{yy}")
+            combinations.add(f"{word}{yy}{mm}{dd}")
+            combinations.add(f"{dd}{mm}{yy}{word}")
+            combinations.add(f"{yy}{mm}{dd}{word}")
+        if contact_numbers:
+            for num in contact_numbers:
+                combinations.add(f"{word}{num[:4]}")
+                combinations.add(f"{word}{num[-4:]}")
+                combinations.add(f"{word}{num}")
+                combinations.add(f"{num[:4]}{word}")
+                combinations.add(f"{num[-4:]}{word}")
+                combinations.add(f"{num}{word}")
+                for sc in special_characters:
+                    combinations.add(f"{word}{sc}{num[:4]}")
+                    combinations.add(f"{word}{sc}{num[-4:]}")
+                    combinations.add(f"{word}{sc}{num}")
+                    combinations.add(f"{num[:4]}{sc}{word}")
+                    combinations.add(f"{num[-4:]}{sc}{word}")
+                    combinations.add(f"{num}{sc}{word}")
+        for word2 in words:
+            if word != word2:
+                combinations.add(f"{word}{word2}")
+                combinations.add(f"{word}{random.choice(special_characters)}{word2}")
+                combinations.add(f"{word2}{random.choice(special_characters)}{word}")
 
-    for i in range(2, len(words) + 1):
-        for perm in itertools.permutations(words, i):
-            perm_str = ''.join(perm)
-            combinations.add(perm_str)
-            combinations.update([perm_str + sc for sc in special_characters])
-            if birthdate:
-                combinations.update([perm_str + dd, perm_str + mm, perm_str + yy, perm_str + dd + mm + yy, perm_str + yy + mm + dd])
-            if contact_numbers:
-                combinations.update([perm_str + cc for cc in contact_combinations])
+    return combinations
 
-    return list(combinations)[:num_passwords]
+def generate_combinations(words, birthdate, contact_numbers, leet, leaked_passwords, num_passwords, fullname):
+    combinations = set()
+
+    combinations.update(common_passwords)
+    combinations.update(leaked_passwords)
+
+    if fullname:
+        first_name, last_name = fullname
+        words.append(first_name)
+        words.append(last_name)
+
+    word_combinations = apply_patterns(words, birthdate, contact_numbers, leet)
+    
+    combinations.update(word_combinations)
+
+    valid_passwords = set()
+    for pwd in combinations:
+        if len(valid_passwords) >= num_passwords:
+            break
+        if policy.test(pwd):
+            continue
+        valid_passwords.add(pwd)
+
+    return list(valid_passwords)[:num_passwords]
 
 def print_banner():
     banner = """
@@ -131,8 +156,8 @@ def main():
     parser.add_argument('-l', '--leet', action='store_true', help="Enable leet transformations.")
     parser.add_argument('-o', '--output', type=str, help="Output file to save generated passwords.")
     parser.add_argument('-f', '--file', type=str, help="File containing leaked passwords to enhance generation.")
-    parser.add_argument('-n', '--number', type=int, help="Number of passwords to generate.")
-    
+    parser.add_argument('-n', '--number', type=int, default=1000, help="Number of passwords to generate.")
+    parser.add_argument('--fullname', type=str, help="Full name: Firstname Lastname.")
     args = parser.parse_args()
 
     words = re.split(r'[ ,]+', ' '.join(args.words))
@@ -142,6 +167,7 @@ def main():
     output_file = args.output
     num_passwords = args.number
     leaked_passwords = set()
+    fullname = tuple(args.fullname.split()) if args.fullname else None
 
     if args.file:
         try:
@@ -156,7 +182,7 @@ def main():
     animation_thread.start()
 
     start_time = time.time()
-    passwords = generate_combinations(words, birthdate, contact_numbers, leet, leaked_passwords, num_passwords)
+    passwords = generate_combinations(words, birthdate, contact_numbers, leet, leaked_passwords, num_passwords, fullname)
     end_time = time.time()
     time_taken = end_time - start_time
 
@@ -181,6 +207,7 @@ if __name__ == "__main__":
         birthdate = input("Enter Birth date (DDMMYYYY): ")
         contact_numbers = input("Enter Contact numbers separated by space or comma: ").split(',')
         leet = input("Enable leet transformations? (Y/N): ").lower() in ['y', 'yes']
+        fullname = input("Enter Full name: Firstname Lastname: ").strip().split()
         leaked_passwords = set()
         leaked_file = input("Enter file path for leaked passwords (optional): ").strip()
         if leaked_file:
@@ -196,7 +223,7 @@ if __name__ == "__main__":
         animation_thread.start()
 
         start_time = time.time()
-        passwords = generate_combinations(words, birthdate, contact_numbers, leet, leaked_passwords, num_passwords)
+        passwords = generate_combinations(words, birthdate, contact_numbers, leet, leaked_passwords, num_passwords, tuple(fullname))
         end_time = time.time()
         time_taken = end_time - start_time
 
